@@ -220,6 +220,7 @@ void eval(char *cmdline)
              {
                  addjob(jobs, pid, BG, cmdline);
                  
+                 printf("[%d] (%d) %s", pid2jid(pid), pid, cmdline);
                  if(verbose) printf("eval: exiting\n");
                  return;
              }
@@ -442,11 +443,6 @@ void sigchld_handler(int sig)
         }
         sigprocmask(SIG_SETMASK, &prev_mask, NULL); // restoring signals
     }
-    if(errno != ECHILD)
-     {
-         printf("waitpid error\n");
-         exit(-1);
-     }
 
     errno = olderrno;   // restores old errno
     
