@@ -68,13 +68,13 @@ void sigint_handler(int sig);
 /* Here are the error-checking system call functions */
 void Sigemptyset(sigset_t *set);
 void Sigaddset(sigset_t *set, int signum);
+void Sigfillset(sigset_t *set);
 void Sigprocmask(int how, const sigset_t *set, sigset_t *oldset);
 
 void Kill(pid_t pid, int sig);
 void Setpgid(pid_t pid, pid_t pgid);
 pid_t Fork(void);
 
-/* Here are helper routines that we've provided for you */
 int parseline(const char *cmdline, char **argv); 
 void sigquit_handler(int sig);
 
@@ -178,16 +178,18 @@ void eval(char *cmdline)
     if(verbose) printf("eval: entering\n");
 
     char * argv[MAXARGS];
-    
     sigset_t mask, prevMask;
-    sigemptyset(&mask);
-    sigaddset(&mask, SIGCHLD);
+    Sigemptyset(&mask);
+    Sigaddset(&mask, SIGCHLD);
    
     int bgfg = 0;   // 1: bg, 0: fg
     pid_t pid;
-
+   
     bgfg = parseline(cmdline, argv);
-
+    
+    if(argv[0] == NULL) 
+        return;     // ignore the empty line
+    
     if(!strcmp(argv[0], "quit") || !strcmp(argv[0], "jobs") || !strcmp(argv[0], "bg") || !strcmp(argv[0], "fg"))
      {
         if(builtin_cmd(argv))  // execute builtin-command
@@ -198,25 +200,25 @@ void eval(char *cmdline)
      }
      else
      {
-         sigprocmask(SIG_BLOCK, &mask, &prevMask);    // blocking SIGCHLD to avoid race condition
+         Sigprocmask(SIG_BLOCK, &mask, &prevMask);    // blocking SIGCHLD to avoid race condition
          
-         if((pid = fork()) == 0)    // child
+         if((pid = Fork()) == 0)    // child
          {
-            sigprocmask(SIG_SETMASK, &prevMask, NULL);  // restoring the blocking bit vector before execve
-            setpgid(0, 0);  // putting the child in a new process group of its own pid
+            Sigprocmask(SIG_SETMASK, &prevMask, NULL);  // restoring the blocking bit vector before execve
+            Setpgid(0, 0);  // putting the child in a new process group of its own pid
                             // avoiding signals going into all the other processes dervied from shell
 
             if(execve(argv[0], argv, environ) == -1)    // if execve fails
             {
                 printf("%s: Command not found\n", argv[0]);
-                
+                     
                 if(verbose) printf("eval: exiting\n");
                 return;
             }        
          }
          else   // parent
          {
-             sigprocmask(SIG_SETMASK, &prevMask, NULL); // restoring the bit vector
+             Sigprocmask(SIG_SETMASK, &prevMask, NULL); // restoring the bit vector
              
              if(!bgfg)  // if child is the foreground process
              {
@@ -380,13 +382,13 @@ void do_bgfg(char **argv)
     //               then runs it in the background/foreground
     if(!strcmp(mode, "bg"))
     {
-        kill(-(tempJob->pid), SIGCONT);
+        Kill(-(tempJob->pid), SIGCONT);
         tempJob->state = BG;
         printf("[%d] (%d) %s", tempJob->jid, tempJob->pid, tempJob->cmdline);
     }
     else if(!strcmp(mode,"fg"))
     {
-        kill(-(tempJob->pid), SIGCONT);
+        Kill(-(tempJob->pid), SIGCONT);
         tempJob->state = FG;
         waitfg(tempJob->pid);
     }
@@ -441,7 +443,7 @@ void sigchld_handler(int sig)
     int status;
 
     sigset_t mask, prev_mask;    
-    sigfillset(&mask);  // filling mask with 1s
+    Sigfillset(&mask);  // filling mask with 1s
 
     int olderrno = errno;   // saves old errno
 
@@ -449,7 +451,7 @@ void sigchld_handler(int sig)
     {
         int jid = getjobpid(jobs, pid)->jid;    // correspoding jid to pid
 
-        sigprocmask(SIG_BLOCK, &mask, &prev_mask);  // blocking every signal
+        Sigprocmask(SIG_BLOCK, &mask, &prev_mask);  // blocking every signal
         if(WIFSIGNALED(status)) // child terminated due to a signal
         {
             printf("Job [%d] (%d) terminated by signal %d\n", jid, pid, WTERMSIG(status));
@@ -465,7 +467,7 @@ void sigchld_handler(int sig)
             printf("Job [%d] (%d) stopped by signal %d\n", jid, pid, WSTOPSIG(status));
             getjobpid(jobs, pid)->state = ST;    // updating the state of the job
         }
-        sigprocmask(SIG_SETMASK, &prev_mask, NULL); // restoring signals
+        Sigprocmask(SIG_SETMASK, &prev_mask, NULL); // restoring signals
     }
 
     errno = olderrno;   // restores old errno
@@ -487,22 +489,22 @@ void sigint_handler(int sig)
     int olderrno = errno;
 
     sigset_t mask, prevMask;
-    sigfillset(&mask);
+    Sigfillset(&mask);
 
     pid_t fg = fgpid(jobs);
-    sigprocmask(SIG_BLOCK, &mask, &prevMask);
+    Sigprocmask(SIG_BLOCK, &mask, &prevMask);
 
     if(fg != 0)
     {
-        kill(-fg, SIGINT);  // sends SIGINT to the foreground process group
-
-        sigprocmask(SIG_SETMASK, &prevMask, NULL);
+        Kill(-fg, SIGINT);  // sends SIGINT to the foreground process group
+        
+        Sigprocmask(SIG_SETMASK, &prevMask, NULL);
         errno = olderrno;
         return;
     }
     else
     {
-        sigprocmask(SIG_SETMASK, &prevMask, NULL);
+        Sigprocmask(SIG_SETMASK, &prevMask, NULL);
 
         if(verbose) printf("sigint_handler: exiting\n");
 
@@ -523,23 +525,23 @@ void sigtstp_handler(int sig)
     int olderrno = errno;
 
     sigset_t mask, prevMask;
-    sigfillset(&mask);
+    Sigfillset(&mask);
 
     pid_t fg = fgpid(jobs);
 
-    sigprocmask(SIG_BLOCK, &mask, &prevMask);
+    Sigprocmask(SIG_BLOCK, &mask, &prevMask);
 
     if(fg != 0) // if there is a foreground process
     {        
-        kill(-fg, SIGTSTP);    // sends SIGTSTP to the foreground process group
+        Kill(-fg, SIGTSTP);    // sends SIGTSTP to the foreground process group
         
-        sigprocmask(SIG_SETMASK, &prevMask, NULL);
+        Sigprocmask(SIG_SETMASK, &prevMask, NULL);
         errno = olderrno;
         return;
     }
     else
     {
-        sigprocmask(SIG_SETMASK, &prevMask, NULL);
+        Sigprocmask(SIG_SETMASK, &prevMask, NULL);
 
         if(verbose) printf("sigtstp_handler: exiting\n");
 
@@ -774,7 +776,7 @@ void sigquit_handler(int sig)
  */
  void Sigemptyset(sigset_t *set)
 {
-    if(sigemptyset(set) != 0) unix_error("error in sigemptyset\n");
+    if(sigemptyset(set) != 0) unix_error("error in sigemptyset");
 
     return;
 }
@@ -784,7 +786,17 @@ void sigquit_handler(int sig)
  */
 void Sigaddset(sigset_t *set, int signum)
 {
-    if(sigaddset(set, signum) != 0) unix_error("error in sigaddset\n");
+    if(sigaddset(set, signum) != 0) unix_error("error in sigaddset");
+
+    return;
+}
+
+/*
+ * Sigfillset - error-catching sigfillset.
+ */
+void Sigfillset(sigset_t *set)
+{
+    if(sigfillset(set) != 0) unix_error("error in sigfillset");
 
     return;
 }
@@ -794,7 +806,7 @@ void Sigaddset(sigset_t *set, int signum)
  */
 void Sigprocmask(int how, const sigset_t *set, sigset_t *oldset)
 {
-    if(sigprocmask(how, set, oldset) != 0) unix_error("error in sigprocmask\n");
+    if(sigprocmask(how, set, oldset) != 0) unix_error("error in sigprocmask");
 
     return;
 }
@@ -804,7 +816,7 @@ void Sigprocmask(int how, const sigset_t *set, sigset_t *oldset)
  */
 void Kill(pid_t pid, int sig)
 {
-    if(kill(pid, sig) != 0) unix_error("error in kill\n");
+    if(kill(pid, sig) != 0) unix_error("error in kill");
 
     return;
 }
@@ -814,7 +826,7 @@ void Kill(pid_t pid, int sig)
  */
 void Setpgid(pid_t pid, pid_t pgid)
 {
-    if(setpgid(pid, pgid)) unix_error("error in setpgid\n");
+    if(setpgid(pid, pgid)) unix_error("error in setpgid");
 
     return;
 }
@@ -828,7 +840,7 @@ pid_t Fork(void)
     
     if((pid = fork()) < 0)
     {
-        unix_error("error in fork\n");
+        unix_error("error in fork");
     }
     return pid;
 }
