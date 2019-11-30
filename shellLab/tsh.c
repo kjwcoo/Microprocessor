@@ -65,6 +65,15 @@ void sigchld_handler(int sig);
 void sigtstp_handler(int sig);
 void sigint_handler(int sig);
 
+/* Here are the error-checking system call functions */
+void Sigemptyset(sigset_t *set);
+void Sigaddset(sigset_t *set, int signum);
+void Sigprocmask(int how, const sigset_t *set, sigset_t *oldset);
+
+void Kill(pid_t pid, int sig);
+void Setpgid(pid_t pid, pid_t pgid);
+pid_t Fork(void);
+
 /* Here are helper routines that we've provided for you */
 int parseline(const char *cmdline, char **argv); 
 void sigquit_handler(int sig);
@@ -758,4 +767,68 @@ void sigquit_handler(int sig)
 {
     printf("Terminating after receipt of SIGQUIT signal\n");
     exit(1);
+}
+
+/*
+ * Sigemptyset - error-catching sigemptyset.
+ */
+ void Sigemptyset(sigset_t *set)
+{
+    if(sigemptyset(set) != 0) unix_error("error in sigemptyset\n");
+
+    return;
+}
+
+/*
+ * Sigaddset - error-catching sigaddset.
+ */
+void Sigaddset(sigset_t *set, int signum)
+{
+    if(sigaddset(set, signum) != 0) unix_error("error in sigaddset\n");
+
+    return;
+}
+
+/*
+ * Sigprocmask - error-catching sigprocmask.
+ */
+void Sigprocmask(int how, const sigset_t *set, sigset_t *oldset)
+{
+    if(sigprocmask(how, set, oldset) != 0) unix_error("error in sigprocmask\n");
+
+    return;
+}
+
+/*
+ * Kill - error-catching kill.
+ */
+void Kill(pid_t pid, int sig)
+{
+    if(kill(pid, sig) != 0) unix_error("error in kill\n");
+
+    return;
+}
+
+/*
+ * Setpgid - error-checking setpgid.
+ */
+void Setpgid(pid_t pid, pid_t pgid)
+{
+    if(setpgid(pid, pgid)) unix_error("error in setpgid\n");
+
+    return;
+}
+
+/*
+ * Fork - error-checking fork.
+*/
+pid_t Fork(void)
+{
+    pid_t pid;
+    
+    if((pid = fork()) < 0)
+    {
+        unix_error("error in fork\n");
+    }
+    return pid;
 }
