@@ -208,12 +208,12 @@ void eval(char *cmdline)
             Setpgid(0, 0);  // putting the child in a new process group of its own pid
                             // avoiding signals going into all the other processes dervied from shell
 
-            if(execve(argv[0], argv, environ) == -1)    // if execve fails
+            if(execve(argv[0], argv, environ) < 0)    // if execve fails
             {
                 printf("%s: Command not found\n", argv[0]);
                      
                 if(verbose) printf("eval: exiting\n");
-                return;
+                exit(1);
             }        
          }
          else   // parent
