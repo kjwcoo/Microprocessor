@@ -80,7 +80,7 @@ team_t team = {
 #define GET_BP_SUCC(bp) ((char *)(bp) - WSIZE)
 
 /* Write a pointer value at address p */
-#define PUT_PTR(p, ptr)   ((*(unsigned int *)(p)) = ((unsigned int)(ptr)))    
+#define PUT_PTR(p, ptr)   (*((unsigned int *)(p)) = ((unsigned int)(ptr)))    
 
 /* Given block ptr bp, compute address of its header and footer */
 #define HDRP(bp)    ((char *)(bp) - WSIZE)
@@ -91,7 +91,7 @@ team_t team = {
 #define PREV_BLKP(bp)   ((char *)(bp) - GET_SIZE((char *)(bp) - DSIZE))
 
 /* Given pred or succ, compute address of next(succ) and previous(pred) free blocks */
-#define NEXT_FREE(succ)   (*(char **)(succ) - WSIZE)
+#define NEXT_FREE(succ)   (*(char **)(succ))
 #define PREV_FREE(pred)   (*(char **)(pred)) 
 
 /* rounds up to the nearest multiple of ALIGNMENT */
@@ -143,7 +143,8 @@ team_t team = {
  * Global variables
  */
 void *heap_listp;
-void *free_listp;
+unsigned int *free_var = NULL;
+void **free_listp = (void **)(&free_var);
 
 /*
  * Helper function prototypes
@@ -170,8 +171,6 @@ int mm_init(void)
     PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1)); // Prologue footer
     PUT(heap_listp + (3*WSIZE), PACK(0, 1));     // Epilogue header
     heap_listp += (2*WSIZE);    // heap_listp now pointing prologue footer
-    
-    free_listp = NULL;
 
     /* Extends the empty heap with a free block of CHUNKSIZE bytes */
     if(extend_heap(CHUNKSIZE/WSIZE) == NULL)
@@ -195,13 +194,17 @@ void *mm_malloc(size_t size)
         return NULL;
 
     /* Adjusts block size to include overhead and alignment reqs */
-    asize = ALIGN(size);
+    if(size <= DSIZE)
+        asize = 2*DSIZE;
+    else
+        asize = DSIZE * ((size + DSIZE + DSIZE - 1) / DSIZE);
 
     printf("asize: %d\n", asize);   ///////////////
     /* Searches the free list for a fit (first fit) */
     if((bp = find_fit(asize)) != NULL)
     {
         place(bp, asize);
+        printf("malloced: %p\n", bp); /////////////
         return bp;
     }
 
@@ -209,8 +212,13 @@ void *mm_malloc(size_t size)
     extendSize = MAX(asize, CHUNKSIZE);
     if((bp = extend_heap(extendSize/WSIZE)) == NULL)
         return NULL;
-    place(bp, asize);
-    return bp;
+    if((bp = find_fit(asize)) != NULL)
+    {
+        place(bp, asize);
+        printf("ext malloced: %p\n", bp);   ////////
+        return bp;
+    }
+    return 1;
 }
 
 /*
@@ -219,7 +227,7 @@ void *mm_malloc(size_t size)
 void mm_free(void *bp)
 {
     size_t size = GET_SIZE(HDRP(bp));
-    
+    printf("deleted %d size!\n", size);
     PUT(HDRP(bp), PACK(size, 0));
     PUT(FTRP(bp), PACK(size, 0));
     insert_node(bp);
@@ -258,13 +266,13 @@ static void *extend_heap(size_t words)
     PUT(HDRP(bp), PACK(size, 0));   // Free block header
     PUT(FTRP(bp), PACK(size, 0));   // Free block footer
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));   // New epilogue header
-    
+    printf("extension start: %p\n", bp);    ///////////////////
     /* Initialize predecessor and successor */
-    if(free_listp == NULL)
+    if(*(char **)free_listp == NULL)
     {
         PUT_PTR(GET_PRED(bp), NULL);
         PUT_PTR(GET_SUCC(bp), NULL);
-        free_listp = GET_SUCC(bp);
+        PUT_PTR(free_listp, GET_SUCC(bp));
     }
     else
         insert_node(bp);
@@ -279,9 +287,7 @@ static void *extend_heap(size_t words)
 static void *coalesce(void *bp)
 {
     size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
-    printf("prev_alloc: %d ", prev_alloc);
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
-    printf("next_alloc: %d\n", next_alloc);
     size_t size = GET_SIZE(HDRP(bp));
 
     /* Case 1: prev and next both allocated */
@@ -326,16 +332,18 @@ static void *coalesce(void *bp)
 
 /*
  * find_fit - Finds the fit using the first-fit policy
+ * assuming heap space allocated at the beginning
  */
 static void *find_fit(size_t asize)
 {
-    void *ptr;
+    void *ptr = *free_listp;
     
-    for(ptr = (char *)free_listp; GET_SIZE(HDRP(GET_BP_SUCC(ptr))) > 0; ptr = NEXT_FREE(ptr))
+    do
     {
         if(asize <= GET_SIZE(HDRP(GET_BP_SUCC(ptr))))
-            return ptr;
-    }
+            return ptr - WSIZE;
+        ptr = NEXT_FREE(ptr);
+    }while(ptr != NULL);
     return NULL;    // no fit
 }
 
@@ -348,14 +356,16 @@ static void place(void *bp, size_t asize)
 
     if((csize - asize) >= (2*DSIZE))
     { 
-        PUT_PTR((char *)(bp) + asize, GET_BP_PRED(PREV_FREE(GET_PRED(bp))));
-        PUT_PTR((char *)(bp) + asize + WSIZE, GET_BP_SUCC(NEXT_FREE(GET_SUCC(bp))));
-        move_node(bp);
+        PUT_PTR((char *)(bp) + asize, PREV_FREE(GET_PRED(bp)));
+        PUT_PTR((char *)(bp) + asize + WSIZE, NEXT_FREE(GET_SUCC(bp)));
+
         PUT(HDRP(bp), PACK(asize, 1));
         PUT(FTRP(bp), PACK(asize, 1));
         bp = NEXT_BLKP(bp);
         PUT(HDRP(bp), PACK(csize-asize, 0));
         PUT(FTRP(bp), PACK(csize-asize, 0));
+        printf("moving: to %p %d\n", bp, asize);/////////////
+        move_node(bp);
     }
     else
     {
@@ -371,7 +381,7 @@ static void place(void *bp, size_t asize)
 static void insert_node(void *bp)
 {
     PUT_PTR(GET_PRED(bp), NULL);    // pred to NULL
-    PUT_PTR(GET_SUCC(bp), free_listp);      // succ to original next
+    PUT_PTR(GET_SUCC(bp), *(char **)free_listp);      // succ to original next
     PUT_PTR(free_listp, GET_SUCC(bp));
     
     if(*(char **)GET_SUCC(bp) != NULL)
@@ -399,6 +409,8 @@ static void move_node(void *bp)
         PUT_PTR(GET_SUCC(GET_BP_PRED(PREV_FREE(GET_PRED(bp)))), GET_SUCC(bp)); // prev block succ
     if(*(char **)GET_SUCC(bp) != NULL)
         PUT_PTR(GET_PRED(GET_BP_SUCC(NEXT_FREE(GET_SUCC(bp)))), GET_PRED(bp)); // next block pred
+    if(*(char **)GET_PRED(bp) == NULL && *(char **)GET_SUCC(bp) == NULL)
+        PUT_PTR(free_listp, GET_SUCC(bp));
 }
 
 
