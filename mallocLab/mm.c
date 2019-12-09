@@ -72,8 +72,12 @@ team_t team = {
 #define GET_ALLOC(p)    (GET(p) & 0x1)
 
 /* Read the predecessor and successor from block pointer bp */
-#define GET_PRED(bp)    (bp) 
-#define GET_SUCC(bp)    (((char *)(bp)) + WSIZE)
+#define GET_PRED(bp)    ((char *)(bp)) 
+#define GET_SUCC(bp)    ((char *)(bp) + WSIZE)
+
+/* Get the block pointer bp from pred and succ */
+#define GET_BP_PRED(bp) ((char *)(bp))
+#define GET_BP_SUCC(bp) ((char *)(bp) - WSIZE)
 
 /* Write a pointer value at address p */
 #define PUT_PTR(p, ptr)   ((*(unsigned int *)(p)) = ((unsigned int)(ptr)))    
@@ -86,9 +90,9 @@ team_t team = {
 #define NEXT_BLKP(bp)   ((char *)(bp) + GET_SIZE((char *)(bp) - WSIZE))
 #define PREV_BLKP(bp)   ((char *)(bp) - GET_SIZE((char *)(bp) - DSIZE))
 
-/* Given block ptr bp, compute address of next and previous free blocks */
-#define NEXT_FREE(bp)   (*(char **)(GET_SUCC(bp)) - WSIZE)
-#define PREV_FREE(bp)   (*(char **)(GET_PRED(bp))) 
+/* Given pred or succ, compute address of next(succ) and previous(pred) free blocks */
+#define NEXT_FREE(succ)   (*(char **)(succ) - WSIZE)
+#define PREV_FREE(pred)   (*(char **)(pred)) 
 
 /* rounds up to the nearest multiple of ALIGNMENT */
 #define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
@@ -130,8 +134,8 @@ team_t team = {
 /*
  * Basic heap structure
  *
- * Start | Prologue hdr | ftr | ||| blocks ||| | Epilogue ftr
- *   0   |      8/1     | 8/1 | |||||||||||||| |      0/1
+ * Start | Prologue hdr | succ | ftr | ||| blocks ||| | Epilogue ftr
+ *   0   |      8/1     |      | 8/1 | |||||||||||||| |      0/1
  *
  */
 
@@ -139,8 +143,7 @@ team_t team = {
  * Global variables
  */
 void *heap_listp;
-unsigned int *free_list;
-void **free_listp = (void **)(&free_list);
+void *free_listp;
 
 /*
  * Helper function prototypes
@@ -152,7 +155,7 @@ static void place(void *bp, size_t asize);
 static void insert_node(void *bp);
 static void delete_node(void *bp);
 static void move_node(void *bp);
-
+int mm_check(void *bp);
 
 /* 
  * mm_init - initialize the malloc package.
@@ -168,7 +171,7 @@ int mm_init(void)
     PUT(heap_listp + (3*WSIZE), PACK(0, 1));     // Epilogue header
     heap_listp += (2*WSIZE);    // heap_listp now pointing prologue footer
     
-    PUT_PTR(free_listp, NULL);
+    free_listp = NULL;
 
     /* Extends the empty heap with a free block of CHUNKSIZE bytes */
     if(extend_heap(CHUNKSIZE/WSIZE) == NULL)
@@ -194,6 +197,7 @@ void *mm_malloc(size_t size)
     /* Adjusts block size to include overhead and alignment reqs */
     asize = ALIGN(size);
 
+    printf("asize: %d\n", asize);   ///////////////
     /* Searches the free list for a fit (first fit) */
     if((bp = find_fit(asize)) != NULL)
     {
@@ -235,17 +239,6 @@ void *mm_realloc(void *ptr, size_t size)
  */
 int mm_check(void *ptr)
 {
-    char * pointer = *(char **)free_listp - WSIZE;
-    printf("Free list: ROOT -> ");
-    
-    while(GET_SUCC(pointer) != NULL)
-    {
-        printf("%p -> ", pointer);
-        pointer = NEXT_FREE(pointer);
-    }
-
-    printf("NULL\n");
-    return 0;
 }
 
 /*
@@ -255,6 +248,7 @@ static void *extend_heap(size_t words)
 {
     char *bp;
     size_t size;
+
     /* Allocates an even number of words to maintain alignment */
     size = (words % 2) ? ((words + 1) * WSIZE) : (words * WSIZE);
     if((long)(bp = mem_sbrk(size)) == -1)
@@ -266,7 +260,14 @@ static void *extend_heap(size_t words)
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));   // New epilogue header
     
     /* Initialize predecessor and successor */
-    insert_node(bp);
+    if(free_listp == NULL)
+    {
+        PUT_PTR(GET_PRED(bp), NULL);
+        PUT_PTR(GET_SUCC(bp), NULL);
+        free_listp = GET_SUCC(bp);
+    }
+    else
+        insert_node(bp);
     
     /* Coalesce if the previous block was free */
     return coalesce(bp);
@@ -293,7 +294,7 @@ static void *coalesce(void *bp)
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
         PUT(HDRP(bp), PACK(size, 0));
         PUT(FTRP(bp), PACK(size, 0));
-        delete_node(NEXT_FREE(bp));
+        delete_node(NEXT_BLKP(bp));
         insert_node(bp);
     }
 
@@ -304,7 +305,7 @@ static void *coalesce(void *bp)
         PUT(FTRP(bp), PACK(size, 0));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
-        delete_node(NEXT_FREE(bp));
+        delete_node(bp);
         insert_node(bp);
     }
 
@@ -315,8 +316,8 @@ static void *coalesce(void *bp)
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
-        delete_node(NEXT_FREE(bp));
-        delete_node(NEXT_FREE(NEXT_FREE(bp)));
+        delete_node(bp);
+        delete_node(NEXT_BLKP(NEXT_BLKP(bp)));
         insert_node(bp);
     }
     
@@ -330,9 +331,9 @@ static void *find_fit(size_t asize)
 {
     void *ptr;
     
-    for(ptr = (char *)free_listp - WSIZE; GET_SIZE(HDRP(ptr)) > 0; ptr = NEXT_FREE(ptr))
+    for(ptr = (char *)free_listp; GET_SIZE(HDRP(GET_BP_SUCC(ptr))) > 0; ptr = NEXT_FREE(ptr))
     {
-        if(asize <= GET_SIZE(HDRP(ptr)))
+        if(asize <= GET_SIZE(HDRP(GET_BP_SUCC(ptr))))
             return ptr;
     }
     return NULL;    // no fit
@@ -347,14 +348,14 @@ static void place(void *bp, size_t asize)
 
     if((csize - asize) >= (2*DSIZE))
     { 
-        PUT_PTR((char *)(bp) + asize, GET_PRED(bp));
-        PUT_PTR((char *)(bp) + asize + WSIZE, GET_SUCC(bp));
+        PUT_PTR((char *)(bp) + asize, GET_BP_PRED(PREV_FREE(GET_PRED(bp))));
+        PUT_PTR((char *)(bp) + asize + WSIZE, GET_BP_SUCC(NEXT_FREE(GET_SUCC(bp))));
+        move_node(bp);
         PUT(HDRP(bp), PACK(asize, 1));
         PUT(FTRP(bp), PACK(asize, 1));
         bp = NEXT_BLKP(bp);
         PUT(HDRP(bp), PACK(csize-asize, 0));
         PUT(FTRP(bp), PACK(csize-asize, 0));
-        move_node(bp);
     }
     else
     {
@@ -373,6 +374,8 @@ static void insert_node(void *bp)
     PUT_PTR(GET_SUCC(bp), free_listp);      // succ to original next
     PUT_PTR(free_listp, GET_SUCC(bp));
     
+    if(*(char **)GET_SUCC(bp) != NULL)
+        PUT_PTR(GET_PRED(GET_BP_SUCC(NEXT_FREE(GET_SUCC(bp)))), GET_PRED(bp)); 
 } 
 
 /*
@@ -380,8 +383,10 @@ static void insert_node(void *bp)
  */
 static void delete_node(void *bp)
 {
-    PUT_PTR(GET_SUCC(PREV_FREE(bp)), GET_SUCC(NEXT_FREE(bp)));  // prev block succ
-    PUT_PTR(GET_PRED(NEXT_FREE(bp)), GET_PRED(PREV_FREE(bp)));  // next block pred
+    if(*(char **)GET_PRED(bp) != NULL)
+        PUT_PTR(GET_SUCC(GET_BP_PRED(PREV_FREE(GET_PRED(bp)))), GET_SUCC(NEXT_FREE(GET_SUCC(bp))));  // prev block succ
+    if(*(char **)GET_SUCC(bp) != NULL)
+        PUT_PTR(GET_PRED(GET_BP_SUCC(NEXT_FREE(GET_SUCC(bp)))), GET_PRED(PREV_FREE(GET_PRED(bp))));  // next block pred
 }
 
 /*
@@ -390,8 +395,10 @@ static void delete_node(void *bp)
  */
 static void move_node(void *bp)
 {
-    PUT_PTR(GET_SUCC(PREV_FREE(bp)), GET_SUCC(bp)); // prev block succ
-    PUT_PTR(GET_PRED(NEXT_FREE(bp)), GET_PRED(bp)); // next block pred
+    if(*(char **)GET_PRED(bp) != NULL)
+        PUT_PTR(GET_SUCC(GET_BP_PRED(PREV_FREE(GET_PRED(bp)))), GET_SUCC(bp)); // prev block succ
+    if(*(char **)GET_SUCC(bp) != NULL)
+        PUT_PTR(GET_PRED(GET_BP_SUCC(NEXT_FREE(GET_SUCC(bp)))), GET_PRED(bp)); // next block pred
 }
 
 
