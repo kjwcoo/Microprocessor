@@ -212,6 +212,8 @@ void *mm_malloc(size_t size)
     if((bp = find_fit(asize)) != NULL)
     {
         place(bp, asize);
+        heap_print_fw();
+        list_print_fw();
         return bp;
     }
 
@@ -222,6 +224,8 @@ void *mm_malloc(size_t size)
     else
     {
         place(bp, asize);
+        heap_print_fw();
+        list_print_fw();
         return bp;
     }
 }
@@ -240,7 +244,9 @@ void mm_free(void *bp)
     PUT(FTRP(bp), PACK(size, 0));
     coalesce(bp);
     freeCnt++;
-    printf("FreeCnt: %d\n", freeCnt);   
+    printf("FreeCnt: %d\n", freeCnt);
+    heap_print_fw();
+    list_print_fw();   
 }
 
 /*
@@ -248,7 +254,7 @@ void mm_free(void *bp)
  */
 void *mm_realloc(void *ptr, size_t size)
 {
-    
+    return (void *)0;    
 }
 
 /*
@@ -424,8 +430,6 @@ static void insert_node(void *bp)
         PUT_PTR(free_listp, GET_SUCC(bp));  // root pointing to current blk
         PUT_PTR(GET_PRED(GET_NEXT_LIST(bp)), GET_PRED(bp));  // original next backward-pointing current blk
     }
-    heap_print_fw();
-    heap_print_bw();
 } 
 
 /*
@@ -500,15 +504,14 @@ static int is_empty(void)
  */
 static void heap_print_fw(void)
 {
-    char *bp = (char *)heap_listp + WSIZE;
-    printf("START: ");
+    char *bp = (char *)heap_listp;
+    printf("HEAP START: ");
     while(GET_SIZE(HDRP(bp)) != 0)
     {
-        printf("Size: %d, Addr: %p -> ",GET_SIZE(HDRP(bp)),  bp);
+        printf("Alloc: %d, Size: %d, Addr: %p -> ", GET_ALLOC(HDRP(bp)), GET_SIZE(HDRP(bp)),  bp);
         bp = NEXT_BLKP(bp);
-        printf("Next Size: %d, Next Addr: %p -> ", GET_SIZE(HDRP(bp)), bp);
     }
-    printf("END\n");
+    printf("HEAP END\n");
 }
 
 /* 
@@ -519,7 +522,7 @@ static void heap_print_fw(void)
  */
 static void heap_print_bw(void)
 {
-    char *bp = (char *)heap_listp + WSIZE;
+    char *bp = (char *)heap_listp;
     while(GET_SIZE(HDRP(NEXT_BLKP(bp))) != 0)
         bp = NEXT_BLKP(bp);
 
@@ -530,4 +533,22 @@ static void heap_print_bw(void)
         bp = PREV_BLKP(bp);
     }
     printf("START\n");
+}
+
+/*
+ * list_print_fw
+ * Input: none
+ * Output: none
+ * Task: print free list from start to end
+ */
+static void list_print_fw(void)
+{
+    char *node = *(char **)free_listp;  // 'node' stores the successor of the node
+    printf("LIST START: ");
+    while(NEXT_FREE(node) != NULL)
+    {
+        node = NEXT_FREE(node);
+        printf("Size: %d, Addr: %p, Prev: %p, Next: %p -> ", GET_SIZE(HDRP(GET_BP_SUCC(node))), GET_BP_SUCC(node), GET_PREV_LIST(GET_BP_SUCC(node)), GET_NEXT_LIST(GET_PRED(GET_BP_SUCC(node))));
+    }
+    printf("LIST END\n");
 }
