@@ -143,7 +143,8 @@ team_t team = {
  void *heap_listp;
  unsigned int *free_var = NULL;
  void **free_listp = (void **)(&free_var);
-
+ int freeCnt = 0;//////////////////////////////
+ int mallocCnt = 0;////////////////////////
  /* 
   * Function prototypes
   */
@@ -159,7 +160,7 @@ static void place(void *bp, size_t asize);
 /* Free list */
 static void insert_node(void *bp);
 static void delete_node(void *bp);
-static void move_node(void *curr_bp, void *moved_bp);
+static void move_node(void *curr_bp, void *moved_bp, size_t asize);
 static int is_empty(void);
 static void *find_fit(size_t asize);
 /* Error-checking */
@@ -195,6 +196,8 @@ void *mm_malloc(size_t size)
     size_t asize;   // Adjusted block size
     size_t extendSize;  // Amount to extend heap if no fit
     char *bp;
+    mallocCnt++;
+    printf("mallocCnt: %d\n", mallocCnt);
     /* Ignores spurious requests */
     if(size == 0)
         return NULL;
@@ -216,6 +219,11 @@ void *mm_malloc(size_t size)
     extendSize = MAX(asize, CHUNKSIZE);
     if((bp = extend_heap(extendSize/WSIZE)) == NULL)
         return NULL;
+    else
+    {
+        place(bp, asize);
+        return bp;
+    }
 }
 
 /*
@@ -230,7 +238,9 @@ void mm_free(void *bp)
     size_t size = GET_SIZE(HDRP(bp));
     PUT(HDRP(bp), PACK(size, 0));
     PUT(FTRP(bp), PACK(size, 0));
-    coalesce(bp);   
+    coalesce(bp);
+    freeCnt++;
+    printf("FreeCnt: %d\n", freeCnt);   
 }
 
 /*
@@ -322,7 +332,8 @@ static void *coalesce(void *bp)
         PUT(FTRP(bp), PACK(size, 0));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
-        delete_node(bp);    // deletes the previous blk from the free list
+        if(!is_empty())
+            delete_node(bp);    // deletes the previous blk from the free list
         insert_node(bp);    // inserts the merged blk to the free list
     }
 
@@ -349,13 +360,13 @@ static void *coalesce(void *bp)
 static void *find_fit(size_t asize)
 {
     void *ptr = *free_listp;
-    
-    do
+        
+    while(ptr != NULL)
     {
         if(asize <= GET_SIZE(HDRP(GET_BP_SUCC(ptr))))
             return ptr - WSIZE;
         ptr = NEXT_FREE(ptr);
-    }while(ptr != NULL);
+    }
     return NULL;    // no fit
 }
 
@@ -374,8 +385,6 @@ static void place(void *bp, size_t asize)
 
     if((csize - asize) >= (2*DSIZE))
     { 
-        PUT_PTR((char *)(bp) + asize, PREV_FREE(GET_PRED(bp)));
-        PUT_PTR((char *)(bp) + asize + WSIZE, NEXT_FREE(GET_SUCC(bp)));
         // Mark blk as allocated
         PUT(HDRP(bp), PACK(asize, 1));
         PUT(FTRP(bp), PACK(asize, 1));
@@ -383,7 +392,7 @@ static void place(void *bp, size_t asize)
         // Mark the remaining blk
         PUT(HDRP(bp), PACK(csize-asize, 0));
         PUT(FTRP(bp), PACK(csize-asize, 0));
-        move_node(PREV_BLKP(bp), bp);
+        move_node(PREV_BLKP(bp), bp, asize);
     }
     else
     {
@@ -415,6 +424,8 @@ static void insert_node(void *bp)
         PUT_PTR(free_listp, GET_SUCC(bp));  // root pointing to current blk
         PUT_PTR(GET_PRED(GET_NEXT_LIST(bp)), GET_PRED(bp));  // original next backward-pointing current blk
     }
+    heap_print_fw();
+    heap_print_bw();
 } 
 
 /*
@@ -454,10 +465,18 @@ static void delete_node(void *bp)
  * Output: none
  * Task: Moves a node inside the heap without altering topology of the free list
  */
-static void move_node(void *curr_bp, void *moved_bp)
+static void move_node(void *curr_bp, void *moved_bp, size_t asize)
 {
-    PUT_PTR(GET_PRED(moved_bp), PREV_FREE(GET_PRED(curr_bp)));
-    PUT_PTR(GET_SUCC(moved_bp), NEXT_FREE(GET_SUCC(curr_bp)));
+    PUT_PTR((char *)(curr_bp) + asize, PREV_FREE(GET_PRED(curr_bp)));
+    PUT_PTR((char *)(curr_bp) + asize + WSIZE, NEXT_FREE(GET_SUCC(curr_bp)));
+
+    // Predecessor of the next block on the list is altered
+    if(NEXT_FREE(GET_SUCC(curr_bp)) != NULL)
+        PUT_PTR(GET_PRED(GET_NEXT_LIST(curr_bp)), GET_PRED(moved_bp));
+    // Successor of the previous block on the list is altered
+    if(PREV_FREE(GET_PRED(curr_bp)) != NULL)
+        PUT_PTR(GET_SUCC(GET_PREV_LIST(curr_bp)), GET_SUCC(moved_bp));
+    else PUT_PTR(free_listp, GET_SUCC(moved_bp));   // if the block is the first one
 }
 
 /*
@@ -473,3 +492,42 @@ static int is_empty(void)
     else return 0;
 }
 
+/*
+ * heap_print_fw
+ * Input: none
+ * Output: none
+ * Task: print heap from start to end
+ */
+static void heap_print_fw(void)
+{
+    char *bp = (char *)heap_listp + WSIZE;
+    printf("START: ");
+    while(GET_SIZE(HDRP(bp)) != 0)
+    {
+        printf("Size: %d, Addr: %p -> ",GET_SIZE(HDRP(bp)),  bp);
+        bp = NEXT_BLKP(bp);
+        printf("Next Size: %d, Next Addr: %p -> ", GET_SIZE(HDRP(bp)), bp);
+    }
+    printf("END\n");
+}
+
+/* 
+ * heap_print_bw
+ * Input: none
+ * Output: none
+ * Task: print heap from end to start
+ */
+static void heap_print_bw(void)
+{
+    char *bp = (char *)heap_listp + WSIZE;
+    while(GET_SIZE(HDRP(NEXT_BLKP(bp))) != 0)
+        bp = NEXT_BLKP(bp);
+
+    printf("END: ");
+    while(bp != ((char *)heap_listp + WSIZE))
+    {
+        printf("Size: %d, Addr: %p -> ", GET_SIZE(HDRP(bp)), bp);
+        bp = PREV_BLKP(bp);
+    }
+    printf("START\n");
+}
