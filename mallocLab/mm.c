@@ -141,8 +141,8 @@ team_t team = {
   * Global variables
   */
  void *heap_listp;
- unsigned int *free_var = NULL;
- void **free_listp = (void **)(&free_var);
+ unsigned int *free_var;
+ void **free_listp;
  int freeCnt = 0;//////////////////////////////
  int mallocCnt = 0;////////////////////////
  /* 
@@ -177,6 +177,9 @@ static void list_print_bw(void);
  */
 int mm_init(void)
 {
+    //freeCnt = 0;
+    //mallocCnt = 0;
+    heap_listp = NULL;
     free_var = NULL;
     free_listp = (void **)(&free_var);
     if(heap_init() == -1)
@@ -198,8 +201,8 @@ void *mm_malloc(size_t size)
     size_t asize;   // Adjusted block size
     size_t extendSize;  // Amount to extend heap if no fit
     char *bp;
-    mallocCnt++;
-    printf("mallocCnt: %d\n", mallocCnt);
+    //mallocCnt++;
+    //printf("mallocCnt: %d\n", mallocCnt);
     /* Ignores spurious requests */
     if(size == 0)
         return NULL;
@@ -214,8 +217,8 @@ void *mm_malloc(size_t size)
     if((bp = find_fit(asize)) != NULL)
     {
         place(bp, asize);
-        heap_print_fw();
-        list_print_fw();
+        //heap_print_fw();
+        //list_print_fw();
         return bp;
     }
 
@@ -226,8 +229,8 @@ void *mm_malloc(size_t size)
     else
     {
         place(bp, asize);
-        heap_print_fw();
-        list_print_fw();
+        //heap_print_fw();
+        //list_print_fw();
         return bp;
     }
 }
@@ -245,10 +248,10 @@ void mm_free(void *bp)
     PUT(HDRP(bp), PACK(size, 0));
     PUT(FTRP(bp), PACK(size, 0));
     coalesce(bp);
-    freeCnt++;
-    printf("FreeCnt: %d\n", freeCnt);
-    heap_print_fw();
-    list_print_fw();   
+    //freeCnt++;
+    //printf("FreeCnt: %d\n", freeCnt);
+    //heap_print_fw();
+    //list_print_fw();   
 }
 
 /*
@@ -326,10 +329,10 @@ static void *coalesce(void *bp)
     /* Case 2: prev allocated and next free */
     else if(prev_alloc && !next_alloc)
     {
+        delete_node(NEXT_BLKP(bp)); // next node deleted
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
         PUT(HDRP(bp), PACK(size, 0));
         PUT(FTRP(bp), PACK(size, 0));
-        delete_node(NEXT_BLKP(bp)); // next free block must be merged
         insert_node(bp);
     }
 
