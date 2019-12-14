@@ -177,6 +177,8 @@ static void list_print_bw(void);
  */
 int mm_init(void)
 {
+    free_var = NULL;
+    free_listp = (void **)(&free_var);
     if(heap_init() == -1)
         return -1;
     
@@ -544,11 +546,31 @@ static void heap_print_bw(void)
 static void list_print_fw(void)
 {
     char *node = *(char **)free_listp;  // 'node' stores the successor of the node
-    printf("LIST START: ");
-    while(NEXT_FREE(node) != NULL)
+    if(is_empty())
     {
-        node = NEXT_FREE(node);
-        printf("Size: %d, Addr: %p, Prev: %p, Next: %p -> ", GET_SIZE(HDRP(GET_BP_SUCC(node))), GET_BP_SUCC(node), GET_PREV_LIST(GET_BP_SUCC(node)), GET_NEXT_LIST(GET_PRED(GET_BP_SUCC(node))));
+        printf("EMPTY\n");
+        return;
     }
+    printf("LIST START: ");
+    do
+    {
+        char *pred = PREV_FREE(GET_PRED(GET_BP_SUCC(node)));
+        char *succ = NEXT_FREE(node);
+        char *bp = GET_BP_SUCC(node);
+        int size = GET_SIZE(HDRP(bp));
+        /* case 1: no pred & no succ */
+        if((pred == NULL) && (succ == NULL))
+            printf("Size: %d, Addr: %p, Prev: NULL, Next: NULL -> ", size, bp);
+        /* case 2: no pred & succ */
+        else if((pred == NULL) && (succ != NULL))
+            printf("Size: %d, Addr: %p, Prev: NULL, Next: %p -> ", size, bp, GET_NEXT_LIST(bp));
+        /* case 3: pred & no succ */
+        else if((pred != NULL) && (succ == NULL))
+            printf("Size: %d, Addr: %p, Prev: %p, Next: NULL -> ", size, bp, GET_PREV_LIST(bp));
+        /* case 4: pred & succ */
+        else
+            printf("Size: %d, Addr: %p, Prev: %p, Next: %p -> ", size, bp, GET_PREV_LIST(bp), GET_NEXT_LIST(bp));
+        
+    }while((node = NEXT_FREE(node)) != NULL);
     printf("LIST END\n");
 }
