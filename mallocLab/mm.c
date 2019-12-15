@@ -244,6 +244,7 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *bp)
 {
+    if(bp == NULL) return;  // does nothing when bp == NULL
     size_t size = GET_SIZE(HDRP(bp));
     PUT(HDRP(bp), PACK(size, 0));
     PUT(FTRP(bp), PACK(size, 0));
@@ -255,11 +256,119 @@ void mm_free(void *bp)
 }
 
 /*
- * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
+ * mm_realloc
+ * Input: desired block ptr, size(not asize) to be allocated
+ * Output: allocated block ptr
+ * Task: Checks corner cases (ptr == NULL, size = 0) and if not,
+ *       puts the block in a least-moving way
+ * Implementation Warning: 1. if ptr == NULL, malloc (including ptr == NULL, size = 0)
+ *                         2. if size == 0, free
+ * Warning: 1. NULL does not necessarily mean failure.
+ *             If (ptr, size) == (NULL, 0) or (ptr, 0), always return NULL
  */
 void *mm_realloc(void *ptr, size_t size)
 {
-    return (void *)0;    
+    /* case 1. ptr == NULL */
+    if(ptr == NULL) return mm_malloc(size);
+    /* case 2. size == 0 */
+    else if (size == 0)
+    {
+        mm_free(ptr);
+        return NULL;
+    }
+    /* case 3. ordinary case */
+    else
+    {
+        int asize = ALIGN(size + DSIZE);    // asize must include hdr and ftr
+        int blksize = GET_SIZE(HDRP(ptr));
+        /* case 3-1. current blk size is enough */
+        if(blksize >= asize)
+        {
+            PUT(HDRP(ptr), PACK(asize, 1));
+            PUT(FTRP(ptr), PACK(asize, 1));
+            return ptr;
+        }
+        /* case 3-2. next blk is free and provides enough space */
+        else if((!GET_ALLOC(HDRP(NEXT_BLKP(ptr)))) 
+            && ((blksize + GET_SIZE(HDRP(NEXT_BLKP(ptr)))) >= asize))
+        {
+            int next_blksize = GET_SIZE(HDRP(NEXT_BLKP(ptr)));
+            // manipulating next block
+            if(next_blksize + blksize <= asize + DSIZE)   // if the remaining blk is less than 8 bytes, useless
+            {
+                delete_node(NEXT_BLKP(ptr));
+                asize += DSIZE;
+            }
+            else
+            {
+                char *next = NEXT_BLKP(ptr);
+                char *moved_next = next + asize;
+                int new_size = next_blksize - (asize - blksize);
+                move_node(next, moved_next, asize);
+                PUT(HDRP(moved_next), PACK(new_size, 0));
+                PUT(FTRP(moved_next), PACK(new_size, 0));
+            }
+            // manipulating current block
+            PUT(HDRP(ptr), PACK(asize, 1));
+            PUT(FTRP(ptr), PACK(asize, 1));
+            return ptr;
+        }
+        /* case 3-3: previous blk is free and provides enough space */
+        else if((!GET_ALLOC(HDRP(PREV_BLKP(ptr))))
+            && ((blksize + GET_SIZE(HDRP(PREV_BLKP(ptr)))) >= asize))
+        {
+            void *prev = PREV_BLKP(ptr);
+            int prev_blksize = GET_SIZE(HDRP(prev));
+            // delete & reinsert the node due to overlapping problem
+            delete_node(ptr);    
+            // must copy data first since moving prev blk contaminates next blk
+            memmove(HDRP(prev), HDRP(ptr), blksize);
+            // manipulating prev blk
+            if(prev_blksize + blksize <= asize + DSIZE)
+                asize += DSIZE;
+            PUT(HDRP(prev), PACK(asize, 1));
+            PUT(FTRP(prev), PACK(asize, 1));
+            // manipulating current blk
+            int new_size = blksize - (asize - prev_blksize);
+            char *moved_ptr = (char *)ptr + asize;
+            PUT(HDRP(moved_ptr), PACK(new_size, 0));
+            PUT(FTRP(moved_ptr), PACK(new_size, 0));
+            insert_node(moved_ptr);
+            return prev;   
+        }
+        /* case 3-4: adjacent free blocks do not provide enough space */
+        else
+        {
+            void *new_ptr = find_fit(asize);
+            if(new_ptr == NULL) // if no fit 
+            {
+                new_ptr = extend_heap(CHUNKSIZE/WSIZE);
+                if(new_ptr == NULL) return (void *)-1;
+            }
+            int fit_blksize = GET_SIZE(HDRP(new_ptr));
+            if(fit_blksize <= blksize + DSIZE)  // again, 8 bytes useless
+                asize += DSIZE;
+            // copying data. memcpy since no overlapping
+            memcpy(new_ptr, ptr, blksize);
+            // manipulating current blk
+            PUT(HDRP(ptr), PACK(blksize, 0));
+            PUT(FTRP(ptr), PACK(blksize, 0));
+            insert_node(ptr);
+            // manipulating new blk
+            PUT(HDRP(new_ptr), PACK(asize, 1));
+            PUT(FTRP(new_ptr), PACK(asize, 1));
+            // manipulating remaining blk
+            if(!(fit_blksize <= blksize + DSIZE))   // if consuming all new blk
+                return new_ptr;
+            int new_size = fit_blksize - asize; // fragmented new free blk
+            char *rem_blk = (char *)new_ptr + asize;
+            PUT(HDRP(rem_blk), PACK(new_size, 0));
+            PUT(FTRP(rem_blk), PACK(new_size, 0));
+            insert_node(new_ptr);
+            return new_ptr;
+        }
+    }
+    return NULL;    
 }
 
 /*
