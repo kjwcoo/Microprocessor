@@ -248,6 +248,7 @@ void mm_free(void *bp)
     size_t size = GET_SIZE(HDRP(bp));
     PUT(HDRP(bp), PACK(size, 0));
     PUT(FTRP(bp), PACK(size, 0));
+    //printf("mm_free(%p) called coalesce(%p)!\n", bp, bp);
     coalesce(bp);
     //freeCnt++;
     //printf("FreeCnt: %d\n", freeCnt);
@@ -413,6 +414,7 @@ static void *extend_heap(size_t words)
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));   // New epilogue header
     
     /* Coalesce if the previous block was free */
+    //printf("extend_heap(%d) called coalesce(%p)!\n", words, bp);
     return coalesce(bp);
 }
 
@@ -433,11 +435,13 @@ static void *coalesce(void *bp)
     /* Case 1: prev and next both allocated */
     if(prev_alloc && next_alloc)
     {
+        //printf("Case 1\n");
         insert_node(bp);
     }
     /* Case 2: prev allocated and next free */
     else if(prev_alloc && !next_alloc)
     {
+        //printf("Case 2\n");
         delete_node(NEXT_BLKP(bp)); // next node deleted
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
         PUT(HDRP(bp), PACK(size, 0));
@@ -448,6 +452,7 @@ static void *coalesce(void *bp)
     /* Case 3: prev free and next allocated */
     else if(!prev_alloc && next_alloc)
     {
+        //printf("Case 3\n");
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
         PUT(FTRP(bp), PACK(size, 0));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
@@ -460,12 +465,15 @@ static void *coalesce(void *bp)
     /* Case 4: prev and next both free */
     else
     {
-        size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
-        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-        PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
+        //printf("Case 4\n");
+        void *prev_bp = PREV_BLKP(bp);
+        void *next_bp = NEXT_BLKP(bp);
+        size += GET_SIZE(HDRP(prev_bp)) + GET_SIZE(FTRP(next_bp));
+        PUT(HDRP(prev_bp), PACK(size, 0));
+        PUT(FTRP(prev_bp), PACK(size, 0));
         bp = PREV_BLKP(bp);
-        delete_node(bp);    // deletes the previous blk from the free list
-        delete_node(NEXT_BLKP(NEXT_BLKP(bp)));  // deletes the next blk as well
+        delete_node(prev_bp);    // deletes the previous blk from the free list
+        delete_node(next_bp);  // deletes the next blk as well
         insert_node(bp);    // inserts the merged blk
     }
     
