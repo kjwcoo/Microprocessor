@@ -1,10 +1,9 @@
 /*
- * mm-naive.c - The fastest, least memory-efficient malloc package.
- * 
- * In this naive approach, a block is allocated by simply incrementing
- * the brk pointer.  A block is pure payload. There are no headers or
- * footers.  Blocks are never coalesced or reused. Realloc is
- * implemented directly using mm_malloc(size_t size)
+ * mm.c
+ *
+ * In this approach, explicit free list with first-fit and immediate
+ * coalescing is implemented. Detailed structures are shown right after
+ * the macros. 
  */
 
 #include <stdio.h>
@@ -143,8 +142,7 @@ team_t team = {
  void *heap_listp;
  unsigned int *free_var;
  void **free_listp;
- //int freeCnt = 0;//////////////////////////////
- //int mallocCnt = 0;////////////////////////
+ 
  /* 
   * Function prototypes
   */
@@ -160,13 +158,12 @@ static void place(void *bp, size_t asize);
 /* Free list */
 static void insert_node(void *bp);
 static void delete_node(void *bp);
-static void move_node(void *curr_bp, void *moved_bp, size_t asize);
+//static void move_node(void *curr_bp, void *moved_bp, size_t asize);
 static int is_empty(void);
 static void *find_fit(size_t asize);
 /* Error-checking */
 static void heap_print_fw(void);
 static void list_print_fw(void);
-static int memory_check(void *src_bp, void *dest_bp, int blksize);
 
 /* 
  * mm_init
@@ -176,8 +173,6 @@ static int memory_check(void *src_bp, void *dest_bp, int blksize);
  */
 int mm_init(void)
 {
-    //freeCnt = 0;
-    //mallocCnt = 0;
     heap_listp = NULL;
     free_var = NULL;
     free_listp = (void **)(&free_var);
@@ -200,8 +195,6 @@ void *mm_malloc(size_t size)
     size_t asize;   // Adjusted block size
     size_t extendSize;  // Amount to extend heap if no fit
     char *bp;
-    //mallocCnt++;
-    //printf("mallocCnt: %d\n", mallocCnt);
     /* Ignores spurious requests */
     if(size == 0)
         return NULL;
@@ -216,8 +209,6 @@ void *mm_malloc(size_t size)
     if((bp = find_fit(asize)) != NULL)
     {
         place(bp, asize);
-        //heap_print_fw();
-        //list_print_fw();
         return bp;
     }
 
@@ -228,8 +219,6 @@ void *mm_malloc(size_t size)
     else
     {
         place(bp, asize);
-        //heap_print_fw();
-        //list_print_fw();
         return bp;
     }
 }
@@ -247,12 +236,7 @@ void mm_free(void *bp)
     size_t size = GET_SIZE(HDRP(bp));
     PUT(HDRP(bp), PACK(size, 0));
     PUT(FTRP(bp), PACK(size, 0));
-    //printf("mm_free(%p) called coalesce(%p)!\n", bp, bp);
     coalesce(bp);
-    //freeCnt++;
-    //printf("FreeCnt: %d\n", freeCnt);
-    //heap_print_fw();
-    //list_print_fw();   
 }
 
 /*
@@ -284,7 +268,6 @@ void *mm_realloc(void *ptr, size_t size)
         /* case 3-1. current blk size is enough */
         if(blksize >= asize)
         {
-            //printf("current blk problem\n");
             if(blksize - asize <= DSIZE)
                 asize = blksize;
             PUT(HDRP(ptr), PACK(asize, 1));
@@ -302,7 +285,6 @@ void *mm_realloc(void *ptr, size_t size)
         else if((!GET_ALLOC(HDRP(NEXT_BLKP(ptr)))) 
             && ((blksize + GET_SIZE(HDRP(NEXT_BLKP(ptr)))) >= asize))
         {
-            //printf("next & current blk problem\n");
             void *next_blk = NEXT_BLKP(ptr);
             int next_blksize = GET_SIZE(HDRP(next_blk));
             // manipulating next block
@@ -333,7 +315,6 @@ void *mm_realloc(void *ptr, size_t size)
         else if((!GET_ALLOC(HDRP(PREV_BLKP(ptr))))
             && ((blksize + GET_SIZE(HDRP(PREV_BLKP(ptr)))) >= asize))
         {
-            //printf("prev & current blk problem\n");
             void *prev = PREV_BLKP(ptr);
             int prev_blksize = GET_SIZE(HDRP(prev));
             delete_node(prev);
@@ -360,7 +341,6 @@ void *mm_realloc(void *ptr, size_t size)
         /* case 3-4: adjacent free blocks do not provide enough space */
         else
         {
-            //printf("finding fit problem\n");
             void *new_ptr = find_fit(asize);
             if(new_ptr == NULL) // if no fit 
             {
@@ -440,7 +420,6 @@ static void *extend_heap(size_t words)
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));   // New epilogue header
     
     /* Coalesce if the previous block was free */
-    //printf("extend_heap(%d) called coalesce(%p)!\n", words, bp);
     return coalesce(bp);
 }
 
@@ -461,13 +440,11 @@ static void *coalesce(void *bp)
     /* Case 1: prev and next both allocated */
     if(prev_alloc && next_alloc)
     {
-        //printf("Case 1\n");
         insert_node(bp);
     }
     /* Case 2: prev allocated and next free */
     else if(prev_alloc && !next_alloc)
     {
-        //printf("Case 2\n");
         delete_node(NEXT_BLKP(bp)); // next node deleted
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
         PUT(HDRP(bp), PACK(size, 0));
@@ -478,7 +455,6 @@ static void *coalesce(void *bp)
     /* Case 3: prev free and next allocated */
     else if(!prev_alloc && next_alloc)
     {
-        //printf("Case 3\n");
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
         PUT(FTRP(bp), PACK(size, 0));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
@@ -491,7 +467,6 @@ static void *coalesce(void *bp)
     /* Case 4: prev and next both free */
     else
     {
-        //printf("Case 4\n");
         void *prev_bp = PREV_BLKP(bp);
         void *next_bp = NEXT_BLKP(bp);
         size += GET_SIZE(HDRP(prev_bp)) + GET_SIZE(FTRP(next_bp));
@@ -506,15 +481,17 @@ static void *coalesce(void *bp)
     return bp;
 }
 
-////////////////MUST MOVE THIS FUNCTION
 /*
- * find_fit - Finds the fit using the first-fit policy
- * assuming heap space allocated at the beginning
+ * find_fit
+ * Input: asize to be allocated
+ * Output: bp of a fit block
+ * Task: Searches through the free list and find the match.
+ * Description: Implemented using first fit
  */
 static void *find_fit(size_t asize)
 {
     void *ptr = *free_listp;
-        
+    
     while(ptr != NULL)
     {
         if(asize <= GET_SIZE(HDRP(GET_BP_SUCC(ptr))))
@@ -682,27 +659,6 @@ static void heap_print_fw(void)
     printf("HEAP END\n");
 }
 
-/* 
- * heap_print_bw
- * Input: none
- * Output: none
- * Task: print heap from end to start
- */
-static void heap_print_bw(void)
-{
-    char *bp = (char *)heap_listp;
-    while(GET_SIZE(HDRP(NEXT_BLKP(bp))) != 0)
-        bp = NEXT_BLKP(bp);
-
-    printf("END: ");
-    while(bp != ((char *)heap_listp + WSIZE))
-    {
-        printf("Size: %d, Addr: %p -> ", GET_SIZE(HDRP(bp)), bp);
-        bp = PREV_BLKP(bp);
-    }
-    printf("START\n");
-}
-
 /*
  * list_print_fw
  * Input: none
@@ -739,20 +695,4 @@ static void list_print_fw(void)
         
     }while((node = NEXT_FREE(node)) != NULL);
     printf("LIST END\n");
-}
-
-/*
- * memory_check
- * Input: src block, dest block, block size
- * Output: 1(preserved), 0(not preserved)
- * Task: check src and dest memory and see if there is any mistmatch
- */
-static int memory_check(void *src_bp, void *dest_bp, int blksize)
-{
-    for(int i = 0; i < blksize - DSIZE; i++)
-    {
-        if(((char *)src_bp)[i] != ((char *)dest_bp)[i])
-            return 0;
-    }
-    return 1;
 }
